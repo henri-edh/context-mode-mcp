@@ -10,7 +10,7 @@
  * stdout on Windows before the buffer is flushed.
  */
 
-import { readFileSync, writeFileSync, existsSync, rmSync, cpSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, copyFileSync, readdirSync, statSync } from "node:fs";
 import { resolve, dirname, basename } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir, tmpdir } from "node:os";
@@ -24,6 +24,17 @@ try {
   security = await import(pathToFileURL(secPath).href);
 } catch {
   // Build not available — skip security checks, rely on existing routing
+}
+
+// ─── Manual recursive copy (avoids cpSync libuv crash on non-ASCII paths, Windows + Node 24) ───
+function copyDirSync(src, dest) {
+  mkdirSync(dest, { recursive: true });
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    const srcPath = resolve(src, entry.name);
+    const destPath = resolve(dest, entry.name);
+    if (entry.isDirectory()) copyDirSync(srcPath, destPath);
+    else copyFileSync(srcPath, destPath);
+  }
 }
 
 // ─── Self-heal: rename dir to correct version, fix registry + hooks ───
@@ -41,7 +52,7 @@ try {
     //    create correct dir, copy files, update registry + hooks
     const correctDir = resolve(cacheParent, myVersion);
     if (myDirName !== myVersion && !existsSync(correctDir)) {
-      cpSync(myRoot, correctDir, { recursive: true });
+      copyDirSync(myRoot, correctDir);
 
       // Create start.mjs in new dir if missing
       const startMjs = resolve(correctDir, "start.mjs");
