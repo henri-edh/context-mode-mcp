@@ -553,12 +553,12 @@ describe("Source-Scoped Search", () => {
       source: "Node.js v22 CHANGELOG",
     });
 
-    // Without source filter — both sources may match
-    const allResults = store.search("transform refine", 5);
+    // Without source filter — both sources may match (OR mode for cross-chunk terms)
+    const allResults = store.search("transform refine", 5, undefined, "OR");
     assert.ok(allResults.length >= 2, "Should find results from both sources");
 
     // With source filter — only Zod
-    const zodResults = store.search("transform refine", 5, "Zod");
+    const zodResults = store.search("transform refine", 5, "Zod", "OR");
     assert.ok(zodResults.length > 0, "Should find Zod results");
     assert.ok(
       zodResults.every((r) => r.source.includes("Zod")),
@@ -566,7 +566,7 @@ describe("Source-Scoped Search", () => {
     );
 
     // With source filter — only Node.js
-    const nodeResults = store.search("transform refine", 5, "Node.js");
+    const nodeResults = store.search("transform refine", 5, "Node.js", "OR");
     assert.ok(nodeResults.length > 0, "Should find Node.js results");
     assert.ok(
       nodeResults.every((r) => r.source.includes("Node.js")),

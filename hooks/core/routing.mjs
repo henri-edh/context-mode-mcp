@@ -13,13 +13,20 @@
 import { ROUTING_BLOCK, READ_GUIDANCE, GREP_GUIDANCE, BASH_GUIDANCE } from "../routing-block.mjs";
 
 /**
- * Strip quoted content from a shell command so regex only matches command tokens.
- * Removes content inside single quotes, double quotes, and heredocs.
+ * Strip heredoc content from a shell command.
+ * Handles: <<EOF, <<"EOF", <<'EOF', <<-EOF (indented), with optional spaces.
+ */
+function stripHeredocs(cmd) {
+  return cmd.replace(/<<-?\s*["']?(\w+)["']?[\s\S]*?\n\s*\1/g, "");
+}
+
+/**
+ * Strip ALL quoted content from a shell command so regex only matches command tokens.
+ * Removes heredocs, single-quoted strings, and double-quoted strings.
  * This prevents false positives like: gh issue edit --body "text with curl in it"
  */
 function stripQuotedContent(cmd) {
-  return cmd
-    .replace(/<<"?(\w+)"?[\s\S]*?\n\1/g, "")   // heredocs (<<EOF...EOF)
+  return stripHeredocs(cmd)
     .replace(/'[^']*'/g, "''")                    // single-quoted strings
     .replace(/"[^"]*"/g, '""');                   // double-quoted strings
 }
@@ -99,9 +106,8 @@ export function routePreToolUse(toolName, toolInput, projectDir) {
 
     // Stage 2: Context-mode routing (existing behavior)
 
-    // curl/wget and inline HTTP detection.
-    // Only check command tokens, not arguments inside quotes.
-    // Strip single-quoted, double-quoted, and heredoc content before matching.
+    // curl/wget detection: strip quoted content first to avoid false positives
+    // like `gh issue edit --body "text with curl in it"` (Issue #63).
     const stripped = stripQuotedContent(command);
 
     // curl/wget → replace with echo redirect
@@ -114,11 +120,16 @@ export function routePreToolUse(toolName, toolInput, projectDir) {
       };
     }
 
-    // inline fetch (node -e, python -c, etc.) → replace with echo redirect
+    // Inline HTTP detection: strip only heredocs (not quotes) so that
+    // code passed via -e/-c flags is still visible to the regex, while
+    // heredoc content (e.g. cat << EOF ... requests.get ... EOF) is removed.
+    // These patterns are specific enough that false positives in quoted
+    // text are rare, unlike single-word "curl"/"wget" (Issue #63).
+    const noHeredoc = stripHeredocs(command);
     if (
-      /fetch\s*\(\s*['"](https?:\/\/|http)/i.test(stripped) ||
-      /requests\.(get|post|put)\s*\(/i.test(stripped) ||
-      /http\.(get|request)\s*\(/i.test(stripped)
+      /fetch\s*\(\s*['"](https?:\/\/|http)/i.test(noHeredoc) ||
+      /requests\.(get|post|put)\s*\(/i.test(noHeredoc) ||
+      /http\.(get|request)\s*\(/i.test(noHeredoc)
     ) {
       return {
         action: "modify",
@@ -165,7 +176,8 @@ export function routePreToolUse(toolName, toolInput, projectDir) {
   }
 
   // ─── MCP execute: security check for shell commands ───
-  if (toolName.includes("context-mode") && toolName.endsWith("__execute")) {
+  // Match both __execute and __ctx_execute (prefixed tool names)
+  if (toolName.includes("context-mode") && /__(ctx_)?execute$/.test(toolName)) {
     if (security && toolInput.language === "shell") {
       const code = toolInput.code ?? "";
       const policies = security.readBashPolicies(projectDir);
@@ -183,7 +195,7 @@ export function routePreToolUse(toolName, toolInput, projectDir) {
   }
 
   // ─── MCP execute_file: check file path + code against deny patterns ───
-  if (toolName.includes("context-mode") && toolName.endsWith("__execute_file")) {
+  if (toolName.includes("context-mode") && /__(ctx_)?execute_file$/.test(toolName)) {
     if (security) {
       // Check file path against Read deny patterns
       const filePath = toolInput.path ?? "";
@@ -213,7 +225,7 @@ export function routePreToolUse(toolName, toolInput, projectDir) {
   }
 
   // ─── MCP batch_execute: check each command individually ───
-  if (toolName.includes("context-mode") && toolName.endsWith("__batch_execute")) {
+  if (toolName.includes("context-mode") && /__(ctx_)?batch_execute$/.test(toolName)) {
     if (security) {
       const commands = toolInput.commands ?? [];
       const policies = security.readBashPolicies(projectDir);

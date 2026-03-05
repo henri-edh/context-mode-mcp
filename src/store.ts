@@ -52,7 +52,7 @@ const STOPWORDS = new Set([
 // Helpers
 // ─────────────────────────────────────────────────────────
 
-function sanitizeQuery(query: string): string {
+function sanitizeQuery(query: string, mode: "AND" | "OR" = "AND"): string {
   const words = query
     .replace(/['"(){}[\]*:^~]/g, " ")
     .split(/\s+/)
@@ -63,15 +63,15 @@ function sanitizeQuery(query: string): string {
     );
 
   if (words.length === 0) return '""';
-  return words.map((w) => `"${w}"`).join(" OR ");
+  return words.map((w) => `"${w}"`).join(mode === "OR" ? " OR " : " ");
 }
 
-function sanitizeTrigramQuery(query: string): string {
+function sanitizeTrigramQuery(query: string, mode: "AND" | "OR" = "AND"): string {
   const cleaned = query.replace(/["'(){}[\]*:^~]/g, "").trim();
   if (cleaned.length < 3) return "";
   const words = cleaned.split(/\s+/).filter((w) => w.length >= 3);
   if (words.length === 0) return "";
-  return words.map((w) => `"${w}"`).join(" OR ");
+  return words.map((w) => `"${w}"`).join(mode === "OR" ? " OR " : " ");
 }
 
 function levenshtein(a: string, b: string): number {
@@ -448,8 +448,8 @@ export class ContentStore {
 
   // ── Search ──
 
-  search(query: string, limit: number = 3, source?: string): SearchResult[] {
-    const sanitized = sanitizeQuery(query);
+  search(query: string, limit: number = 3, source?: string, mode: "AND" | "OR" = "AND"): SearchResult[] {
+    const sanitized = sanitizeQuery(query, mode);
 
     const stmt = source
       ? this.#stmtSearchPorterFiltered
@@ -483,8 +483,9 @@ export class ContentStore {
     query: string,
     limit: number = 3,
     source?: string,
+    mode: "AND" | "OR" = "AND",
   ): SearchResult[] {
-    const sanitized = sanitizeTrigramQuery(query);
+    const sanitized = sanitizeTrigramQuery(query, mode);
     if (!sanitized) return [];
 
     const stmt = source
@@ -548,22 +549,37 @@ export class ContentStore {
     limit: number = 3,
     source?: string,
   ): SearchResult[] {
-    // Layer 1: Porter stemming (existing FTS5 MATCH)
-    const porterResults = this.search(query, limit, source);
-    if (porterResults.length > 0) {
-      return porterResults.map((r) => ({ ...r, matchLayer: "porter" as const }));
+    // Layer 1a: Porter + AND (most precise)
+    const porterAnd = this.search(query, limit, source, "AND");
+    if (porterAnd.length > 0) {
+      return porterAnd.map((r) => ({ ...r, matchLayer: "porter" as const }));
     }
 
-    // Layer 2: Trigram substring matching
-    const trigramResults = this.searchTrigram(query, limit, source);
-    if (trigramResults.length > 0) {
-      return trigramResults.map((r) => ({
+    // Layer 1b: Porter + OR (fallback when AND finds nothing)
+    const porterOr = this.search(query, limit, source, "OR");
+    if (porterOr.length > 0) {
+      return porterOr.map((r) => ({ ...r, matchLayer: "porter" as const }));
+    }
+
+    // Layer 2a: Trigram + AND
+    const trigramAnd = this.searchTrigram(query, limit, source, "AND");
+    if (trigramAnd.length > 0) {
+      return trigramAnd.map((r) => ({
         ...r,
         matchLayer: "trigram" as const,
       }));
     }
 
-    // Layer 3: Fuzzy correction + re-search
+    // Layer 2b: Trigram + OR
+    const trigramOr = this.searchTrigram(query, limit, source, "OR");
+    if (trigramOr.length > 0) {
+      return trigramOr.map((r) => ({
+        ...r,
+        matchLayer: "trigram" as const,
+      }));
+    }
+
+    // Layer 3: Fuzzy correction + re-search (AND then OR)
     const words = query
       .toLowerCase()
       .trim()
@@ -574,21 +590,21 @@ export class ContentStore {
     const correctedQuery = correctedWords.join(" ");
 
     if (correctedQuery !== original) {
-      // Try Porter with corrected query first
-      const fuzzyPorter = this.search(correctedQuery, limit, source);
-      if (fuzzyPorter.length > 0) {
-        return fuzzyPorter.map((r) => ({
-          ...r,
-          matchLayer: "fuzzy" as const,
-        }));
+      const fuzzyPorterAnd = this.search(correctedQuery, limit, source, "AND");
+      if (fuzzyPorterAnd.length > 0) {
+        return fuzzyPorterAnd.map((r) => ({ ...r, matchLayer: "fuzzy" as const }));
       }
-      // Try trigram with corrected query
-      const fuzzyTrigram = this.searchTrigram(correctedQuery, limit, source);
-      if (fuzzyTrigram.length > 0) {
-        return fuzzyTrigram.map((r) => ({
-          ...r,
-          matchLayer: "fuzzy" as const,
-        }));
+      const fuzzyPorterOr = this.search(correctedQuery, limit, source, "OR");
+      if (fuzzyPorterOr.length > 0) {
+        return fuzzyPorterOr.map((r) => ({ ...r, matchLayer: "fuzzy" as const }));
+      }
+      const fuzzyTrigramAnd = this.searchTrigram(correctedQuery, limit, source, "AND");
+      if (fuzzyTrigramAnd.length > 0) {
+        return fuzzyTrigramAnd.map((r) => ({ ...r, matchLayer: "fuzzy" as const }));
+      }
+      const fuzzyTrigramOr = this.searchTrigram(correctedQuery, limit, source, "OR");
+      if (fuzzyTrigramOr.length > 0) {
+        return fuzzyTrigramOr.map((r) => ({ ...r, matchLayer: "fuzzy" as const }));
       }
     }
 

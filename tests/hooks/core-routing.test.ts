@@ -75,21 +75,25 @@ describe("routePreToolUse", () => {
       );
     });
 
-    it("allows git status (passthrough)", () => {
+    it("allows git status with BASH_GUIDANCE context", () => {
       const result = routePreToolUse("Bash", { command: "git status" });
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.action).toBe("context");
+      expect(result!.additionalContext).toBeDefined();
     });
 
-    it("allows mkdir (passthrough)", () => {
+    it("allows mkdir with BASH_GUIDANCE context", () => {
       const result = routePreToolUse("Bash", {
         command: "mkdir -p /tmp/test-dir",
       });
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.action).toBe("context");
     });
 
-    it("allows npm install (passthrough)", () => {
+    it("allows npm install with BASH_GUIDANCE context", () => {
       const result = routePreToolUse("Bash", { command: "npm install" });
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.action).toBe("context");
     });
   });
 

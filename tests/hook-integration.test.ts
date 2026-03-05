@@ -112,20 +112,32 @@ describe("Bash: Redirected Commands", () => {
 });
 
 describe("Bash: Allowed Commands", () => {
-  test("Bash + git status: passthrough", () => {
+  test("Bash + git status: additionalContext with BASH_GUIDANCE", () => {
     const result = runHook({
       tool_name: "Bash",
       tool_input: { command: "git status" },
     });
-    assertPassthrough(result);
+    assert.equal(result.exitCode, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.hookSpecificOutput.additionalContext, "Expected additionalContext for Bash");
+    assert.ok(
+      parsed.hookSpecificOutput.additionalContext.includes("<context_guidance>"),
+      "Expected <context_guidance> in Bash additionalContext",
+    );
   });
 
-  test("Bash + mkdir /tmp/test: passthrough", () => {
+  test("Bash + mkdir /tmp/test: additionalContext with BASH_GUIDANCE", () => {
     const result = runHook({
       tool_name: "Bash",
       tool_input: { command: "mkdir /tmp/test" },
     });
-    assertPassthrough(result);
+    assert.equal(result.exitCode, 0);
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.hookSpecificOutput.additionalContext, "Expected additionalContext for Bash");
+    assert.ok(
+      parsed.hookSpecificOutput.additionalContext.includes("<context_guidance>"),
+      "Expected <context_guidance> in Bash additionalContext",
+    );
   });
 });
 
@@ -347,9 +359,14 @@ describe("Security Policy Enforcement", () => {
       secEnv,
     );
     // git is in allow list → falls through to Stage 2 routing
-    // Stage 2: git is not curl/wget/fetch → passthrough (exit 0, empty stdout)
+    // Stage 2: git is not curl/wget/fetch → additionalContext with BASH_GUIDANCE
     assert.equal(result.exitCode, 0);
-    assert.equal(result.stdout, "", "Allowed command should passthrough to Stage 2");
+    const parsed = JSON.parse(result.stdout);
+    assert.ok(parsed.hookSpecificOutput.additionalContext, "Allowed Bash command should get additionalContext");
+    assert.ok(
+      parsed.hookSpecificOutput.additionalContext.includes("<context_guidance>"),
+      "Expected <context_guidance> in Bash additionalContext",
+    );
   });
 
   test("Security: MCP execute + shell + sudo denied", () => {
@@ -466,11 +483,11 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
     const prompt = parsed.hookSpecificOutput.updatedInput.prompt;
-    assert.ok(prompt.includes(PLUGIN_PREFIX + "batch_execute"), "Expected plugin-format batch_execute");
-    assert.ok(prompt.includes(PLUGIN_PREFIX + "search"), "Expected plugin-format search");
-    assert.ok(prompt.includes(PLUGIN_PREFIX + "execute"), "Expected plugin-format execute");
-    assert.ok(prompt.includes(PLUGIN_PREFIX + "fetch_and_index"), "Expected plugin-format fetch_and_index");
-    assert.ok(!prompt.includes(SHORT_PREFIX + "batch_execute"), "Must not contain short-form batch_execute");
+    assert.ok(prompt.includes(PLUGIN_PREFIX + "ctx_batch_execute"), "Expected plugin-format ctx_batch_execute");
+    assert.ok(prompt.includes(PLUGIN_PREFIX + "ctx_search"), "Expected plugin-format ctx_search");
+    assert.ok(prompt.includes(PLUGIN_PREFIX + "ctx_execute"), "Expected plugin-format ctx_execute");
+    assert.ok(prompt.includes(PLUGIN_PREFIX + "ctx_fetch_and_index"), "Expected plugin-format ctx_fetch_and_index");
+    assert.ok(!prompt.includes(SHORT_PREFIX + "ctx_batch_execute"), "Must not contain short-form ctx_batch_execute");
   });
 
   test("Read nudge uses plugin-format execute_file tool name", () => {
@@ -478,8 +495,8 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
     const ctx = parsed.hookSpecificOutput.additionalContext;
-    assert.ok(ctx.includes(PLUGIN_PREFIX + "execute_file"), "Expected plugin-format execute_file in Read nudge");
-    assert.ok(!ctx.includes(SHORT_PREFIX + "execute_file"), "Read nudge must not contain short-form execute_file");
+    assert.ok(ctx.includes(PLUGIN_PREFIX + "ctx_execute_file"), "Expected plugin-format ctx_execute_file in Read nudge");
+    assert.ok(!ctx.includes(SHORT_PREFIX + "ctx_execute_file"), "Read nudge must not contain short-form ctx_execute_file");
   });
 
   test("Grep nudge uses plugin-format execute tool name", () => {
@@ -487,8 +504,8 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
     const ctx = parsed.hookSpecificOutput.additionalContext;
-    assert.ok(ctx.includes(PLUGIN_PREFIX + "execute"), "Expected plugin-format execute in Grep nudge");
-    assert.ok(!ctx.includes(SHORT_PREFIX + "execute"), "Grep nudge must not contain short-form execute");
+    assert.ok(ctx.includes(PLUGIN_PREFIX + "ctx_execute"), "Expected plugin-format ctx_execute in Grep nudge");
+    assert.ok(!ctx.includes(SHORT_PREFIX + "ctx_execute"), "Grep nudge must not contain short-form ctx_execute");
   });
 
   test("WebFetch deny reason uses plugin-format fetch_and_index tool name", () => {
@@ -496,8 +513,8 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
     const reason = parsed.hookSpecificOutput.reason;
-    assert.ok(reason.includes(PLUGIN_PREFIX + "fetch_and_index"), "Expected plugin-format fetch_and_index in WebFetch deny");
-    assert.ok(!reason.includes(SHORT_PREFIX + "fetch_and_index"), "WebFetch deny must not contain short-form");
+    assert.ok(reason.includes(PLUGIN_PREFIX + "ctx_fetch_and_index"), "Expected plugin-format ctx_fetch_and_index in WebFetch deny");
+    assert.ok(!reason.includes(SHORT_PREFIX + "ctx_fetch_and_index"), "WebFetch deny must not contain short-form");
   });
 
   test("Bash inline-HTTP redirect uses plugin-format execute tool name", () => {
@@ -506,8 +523,8 @@ describe("Plugin Tool Name Format in ROUTING_BLOCK", () => {
     assert.equal(result.exitCode, 0);
     const parsed = JSON.parse(result.stdout);
     const cmd = parsed.hookSpecificOutput.updatedInput.command;
-    assert.ok(cmd.includes(PLUGIN_PREFIX + "execute"), "Expected plugin-format execute in inline-HTTP redirect");
-    assert.ok(!cmd.includes(SHORT_PREFIX + "execute"), "Inline-HTTP redirect must not contain short-form execute");
+    assert.ok(cmd.includes(PLUGIN_PREFIX + "ctx_execute"), "Expected plugin-format ctx_execute in inline-HTTP redirect");
+    assert.ok(!cmd.includes(SHORT_PREFIX + "ctx_execute"), "Inline-HTTP redirect must not contain short-form ctx_execute");
   });
 });
 

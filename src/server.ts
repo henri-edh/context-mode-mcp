@@ -1136,35 +1136,62 @@ server.registerTool(
     }
 
     try {
-      // Build batch script with markdown section headers for proper chunking
-      const script = commands
-        .map((c) => {
-          const safeLabel = c.label.replace(/'/g, "'\\''");
-          return `echo '# ${safeLabel}'\necho ''\n${c.command} 2>&1\necho ''`;
-        })
-        .join("\n");
+      // Execute each command individually so every command gets its own
+      // smartTruncate budget (~100KB). Previously, all commands were
+      // concatenated into a single script where smartTruncate (60% head +
+      // 40% tail) could silently drop middle commands. (Issue #61)
+      const perCommandOutputs: string[] = [];
+      const startTime = Date.now();
+      let timedOut = false;
 
-      const result = await executor.execute({
-        language: "shell",
-        code: script,
-        timeout,
-      });
+      for (const cmd of commands) {
+        const elapsed = Date.now() - startTime;
+        const remaining = timeout - elapsed;
+        if (remaining <= 0) {
+          perCommandOutputs.push(
+            `# ${cmd.label}\n\n(skipped — batch timeout exceeded)\n`,
+          );
+          timedOut = true;
+          continue;
+        }
 
-      if (result.timedOut) {
+        const result = await executor.execute({
+          language: "shell",
+          code: `${cmd.command} 2>&1`,
+          timeout: remaining,
+        });
+
+        const output = result.stdout || "(no output)";
+        perCommandOutputs.push(`# ${cmd.label}\n\n${output}\n`);
+
+        if (result.timedOut) {
+          timedOut = true;
+          // Mark remaining commands as skipped
+          const idx = commands.indexOf(cmd);
+          for (let i = idx + 1; i < commands.length; i++) {
+            perCommandOutputs.push(
+              `# ${commands[i].label}\n\n(skipped — batch timeout exceeded)\n`,
+            );
+          }
+          break;
+        }
+      }
+
+      const stdout = perCommandOutputs.join("\n");
+      const totalBytes = Buffer.byteLength(stdout);
+      const totalLines = stdout.split("\n").length;
+
+      if (timedOut && perCommandOutputs.length === 0) {
         return trackResponse("ctx_batch_execute", {
           content: [
             {
               type: "text" as const,
-              text: `Batch timed out after ${timeout}ms. Partial output:\n${result.stdout?.slice(0, 2000) || "(none)"}`,
+              text: `Batch timed out after ${timeout}ms. No output captured.`,
             },
           ],
           isError: true,
         });
       }
-
-      const stdout = result.stdout || "(no output)";
-      const totalBytes = Buffer.byteLength(stdout);
-      const totalLines = stdout.split("\n").length;
 
       // Track indexed bytes (raw data that stays in sandbox)
       trackIndexed(totalBytes);
@@ -1201,18 +1228,27 @@ server.registerTool(
 
         // Tier 1: scoped search with fallback (porter → trigram → fuzzy)
         let results = store.searchWithFallback(query, 3, source);
+        let crossSource = false;
 
-        // Tier 2: global fallback (no source filter)
+        // Tier 2: global fallback (no source filter) — warn about cross-source (Issue #61)
         if (results.length === 0) {
           results = store.searchWithFallback(query, 3);
+          crossSource = results.length > 0;
         }
 
         queryResults.push(`## ${query}`);
+        if (crossSource) {
+          queryResults.push(
+            `> **Note:** No results in current batch output. Showing results from previously indexed content.`,
+          );
+        }
         queryResults.push("");
         if (results.length > 0) {
           for (const r of results) {
-            const snippet = extractSnippet(r.content, query, 1500, r.highlighted);
-            queryResults.push(`### ${r.title}`);
+            // Use larger snippet (3KB) for batch_execute to reduce tiny-fragment issue (Issue #61)
+            const snippet = extractSnippet(r.content, query, 3000, r.highlighted);
+            const sourceTag = crossSource ? ` _(source: ${r.source})_` : "";
+            queryResults.push(`### ${r.title}${sourceTag}`);
             queryResults.push(snippet);
             queryResults.push("");
             outputSize += snippet.length + r.title.length;

@@ -228,8 +228,8 @@ describe("Shared Knowledge Base (subagent -> main)", () => {
     const contrib = store.search("commits", 1, "subagent-C");
     assert.ok(contrib.length > 0 && contrib[0].content.includes("alice"));
 
-    // Cross-search without source filter finds all
-    const all = store.search("monorepo endpoints commits", 5);
+    // Cross-search without source filter finds all (OR mode for cross-chunk terms)
+    const all = store.search("monorepo endpoints commits", 5, undefined, "OR");
     assert.ok(all.length >= 2, "Global search should find results from multiple subagents");
 
     store.close();
