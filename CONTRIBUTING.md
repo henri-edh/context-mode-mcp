@@ -272,15 +272,23 @@ We follow test-driven development. Every PR must include tests.
 | Domain | Test File |
 |---|---|
 | Adapters | `tests/adapters/<platform>.test.ts` |
+| Client detection | `tests/adapters/detect.test.ts`, `tests/adapters/client-map.test.ts` |
+| Search & FTS5 | `tests/core/search.test.ts` |
+| Server & tools | `tests/core/server.test.ts` |
+| CLI & bundle | `tests/core/cli.test.ts` |
+| Routing | `tests/core/routing.test.ts` |
 | Hook routing | `tests/hooks/core-routing.test.ts` |
 | Hook formatting | `tests/hooks/formatters.test.ts` |
+| Hook integration | `tests/hooks/integration.test.ts` |
 | Session DB | `tests/session/session-db.test.ts` |
 | Session extract | `tests/session/session-extract.test.ts` |
 | Session snapshot | `tests/session/session-snapshot.test.ts` |
+| Session continuity | `tests/session/continuity.test.ts` |
+| Session pipeline | `tests/session/session-pipeline.test.ts` |
 | Executor | `tests/executor.test.ts` |
 | Store/Search | `tests/store.test.ts` |
 | Security | `tests/security.test.ts` |
-| Hook integration | `tests/hook-integration.test.ts` |
+| OpenClaw plugin | `tests/plugins/openclaw.test.ts` |
 
 If your change doesn't fit any existing file, discuss with the maintainer before creating a new one.
 
@@ -299,7 +307,7 @@ The OpenClaw adapter has its own test suite and installation workflow.
 ### Running tests
 
 ```bash
-npx vitest run tests/openclaw-plugin.test.ts tests/openclaw-plugin-hooks.test.ts tests/openclaw/workspace-router.test.ts
+npx vitest run tests/plugins/openclaw.test.ts tests/adapters/openclaw.test.ts
 ```
 
 These tests run without a live OpenClaw instance — they mock the plugin API.
