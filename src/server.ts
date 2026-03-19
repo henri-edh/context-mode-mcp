@@ -130,6 +130,8 @@ const sessionStats = {
   bytesReturned: {} as Record<string, number>,
   bytesIndexed: 0,
   bytesSandboxed: 0, // network I/O consumed inside sandbox (never enters context)
+  cacheHits: 0,
+  cacheBytesSaved: 0, // bytes avoided by TTL cache hits
   sessionStart: Date.now(),
 };
 
@@ -1176,6 +1178,11 @@ server.registerTool(
           const ageHours = Math.floor(ageMs / (60 * 60 * 1000));
           const ageMin = Math.floor(ageMs / (60 * 1000));
           const ageStr = ageHours > 0 ? `${ageHours}h ago` : ageMin > 0 ? `${ageMin}m ago` : "just now";
+          // Track cache savings — estimate ~1.6KB per chunk (average indexed content size)
+          const estimatedBytes = meta.chunkCount * 1600;
+          sessionStats.cacheHits++;
+          sessionStats.cacheBytesSaved += estimatedBytes;
+
           return trackResponse("ctx_fetch_and_index", {
             content: [{
               type: "text" as const,
@@ -1589,6 +1596,31 @@ server.registerTool(
 
       if (keptOut > 0) {
         lines.push("", `Without context-mode, **${kb(totalProcessed)}** of raw output would flood your context window. Instead, **${reductionPct}%** stayed in sandbox.`);
+      }
+
+      // Cache savings section
+      if (sessionStats.cacheHits > 0 || sessionStats.cacheBytesSaved > 0) {
+        const totalWithCache = totalProcessed + sessionStats.cacheBytesSaved;
+        const totalSavingsRatio = totalWithCache / Math.max(totalBytesReturned, 1);
+        const ttlHoursLeft = Math.max(0, 24 - Math.floor((Date.now() - sessionStats.sessionStart) / (60 * 60 * 1000)));
+        lines.push(
+          "",
+          `### TTL Cache`,
+          "",
+          `| Metric | Value |`,
+          `|--------|------:|`,
+          `| Cache hits | **${sessionStats.cacheHits}** |`,
+          `| Data avoided by cache | **${kb(sessionStats.cacheBytesSaved)}** |`,
+          `| Network requests saved | **${sessionStats.cacheHits}** |`,
+          `| TTL remaining | **~${ttlHoursLeft}h** |`,
+          "",
+          `Content was already indexed in the knowledge base — ${sessionStats.cacheHits} fetch${sessionStats.cacheHits > 1 ? "es" : ""} skipped entirely. **${kb(sessionStats.cacheBytesSaved)}** of network I/O avoided. Search results served directly from local FTS5 index.`,
+        );
+
+        // Update total savings to include cache
+        if (totalSavingsRatio > savingsRatio) {
+          lines.push("", `**Total context savings (sandbox + cache): ${totalSavingsRatio.toFixed(1)}x** — ${kb(totalWithCache)} processed, only ${kb(totalBytesReturned)} entered context.`);
+        }
       }
     }
 
