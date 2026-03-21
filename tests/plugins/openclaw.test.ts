@@ -95,8 +95,8 @@ function createMockApiFull() {
  * Returns the mock API state and helper functions.
  */
 async function createTestPlugin(tempDir: string) {
-  // Set OPENCLAW_PROJECT_DIR so each test gets an isolated DB (unique per tempDir)
-  process.env.OPENCLAW_PROJECT_DIR = tempDir;
+  // Each test gets an isolated DB by running from a unique cwd (tempDir).
+  // The plugin reads process.cwd() for projectDir — no fake env var needed.
   const { default: plugin } = await import("../../src/openclaw-plugin.js");
   const mock = createMockApiFull();
   await plugin.register(mock.api);

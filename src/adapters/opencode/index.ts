@@ -49,13 +49,23 @@ import type {
 // OpenCode raw input types
 // ─────────────────────────────────────────────────────────
 
+/** Represents the combined input+output from OpenCode hooks, flattened for adapter parse methods. */
 interface OpenCodeHookInput {
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  tool_output?: string;
-  is_error?: boolean;
-  /** OpenCode uses camelCase for session ID. */
+  /** From input.tool (both before and after hooks) */
+  tool?: string;
+  /** From input.sessionID */
   sessionID?: string;
+  /** From input.callID */
+  callID?: string;
+  /** From output.args (before hook) or input.args (after hook) */
+  args?: Record<string, unknown>;
+  /** From output.output (after hook) */
+  output?: string;
+  /** From output.title (after hook) */
+  title?: string;
+  /** From output.metadata (after hook) */
+  metadata?: unknown;
+  /** For session start source (custom) */
   source?: string;
 }
 
@@ -88,8 +98,8 @@ export class OpenCodeAdapter implements HookAdapter {
   parsePreToolUseInput(raw: unknown): PreToolUseEvent {
     const input = raw as OpenCodeHookInput;
     return {
-      toolName: input.tool_name ?? "",
-      toolInput: input.tool_input ?? {},
+      toolName: input.tool ?? "",
+      toolInput: input.args ?? {},
       sessionId: this.extractSessionId(input),
       projectDir: process.env.OPENCODE_PROJECT_DIR || process.cwd(),
       raw,
@@ -99,10 +109,10 @@ export class OpenCodeAdapter implements HookAdapter {
   parsePostToolUseInput(raw: unknown): PostToolUseEvent {
     const input = raw as OpenCodeHookInput;
     return {
-      toolName: input.tool_name ?? "",
-      toolInput: input.tool_input ?? {},
-      toolOutput: input.tool_output,
-      isError: input.is_error,
+      toolName: input.tool ?? "",
+      toolInput: input.args ?? {},
+      toolOutput: input.output,
+      isError: undefined, // OpenCode doesn't provide isError
       sessionId: this.extractSessionId(input),
       projectDir: process.env.OPENCODE_PROJECT_DIR || process.cwd(),
       raw,

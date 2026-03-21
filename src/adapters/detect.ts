@@ -10,7 +10,7 @@
  *   - Claude Code:    CLAUDE_PROJECT_DIR, CLAUDE_SESSION_ID | ~/.claude/
  *   - Gemini CLI:     GEMINI_PROJECT_DIR (hooks), GEMINI_CLI (MCP) | ~/.gemini/
  *   - OpenCode:       OPENCODE, OPENCODE_PID | ~/.config/opencode/
- *   - OpenClaw:       OPENCLAW_HOME, OPENCLAW_PROJECT_DIR | ~/.openclaw/
+ *   - OpenClaw:       OPENCLAW_HOME, OPENCLAW_CLI | ~/.openclaw/
  *   - Codex CLI:      CODEX_CI, CODEX_THREAD_ID | ~/.codex/
  *   - Cursor:         CURSOR_TRACE_ID (MCP), CURSOR_CLI (terminal) | ~/.cursor/
  *   - VS Code Copilot: VSCODE_PID, VSCODE_CWD | ~/.vscode/
@@ -76,11 +76,11 @@ export function detectPlatform(clientInfo?: { name: string; version?: string }):
     };
   }
 
-  if (process.env.OPENCLAW_HOME || process.env.OPENCLAW_PROJECT_DIR) {
+  if (process.env.OPENCLAW_HOME || process.env.OPENCLAW_CLI) {
     return {
       platform: "openclaw",
       confidence: "high",
-      reason: "OPENCLAW_HOME or OPENCLAW_PROJECT_DIR env var set",
+      reason: "OPENCLAW_HOME or OPENCLAW_CLI env var set",
     };
   }
 

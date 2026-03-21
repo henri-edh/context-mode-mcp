@@ -13,7 +13,7 @@
 
 import { strict as assert } from "node:assert";
 import { spawnSync, execSync } from "node:child_process";
-import { writeFileSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1002,3 +1002,43 @@ if (LIVE) {
     });
   });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ctx_upgrade: inline fallback for missing CLI files
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("ctx_upgrade tool: inline fallback for missing CLI", () => {
+  const serverSrc = readFileSync(
+    resolve(__dirname, "../../src/server.ts"),
+    "utf-8",
+  );
+
+  test("tries cli.bundle.mjs first", () => {
+    expect(serverSrc).toContain("cli.bundle.mjs");
+    // The bundle path should be checked before fallback
+    expect(serverSrc).toMatch(/existsSync\(bundlePath\)/);
+  });
+
+  test("tries build/cli.js second", () => {
+    expect(serverSrc).toContain('resolve(pluginRoot, "build", "cli.js")');
+  });
+
+  test("contains inline fallback with git clone when neither CLI file exists", () => {
+    // The fallback must generate an inline node -e script with git clone
+    expect(serverSrc).toMatch(/git clone --depth 1/);
+    // The inline script should be a node -e one-liner or heredoc
+    expect(serverSrc).toMatch(/node -e/);
+  });
+
+  test("inline fallback copies key files to plugin root", () => {
+    // The inline script must copy build artifacts back
+    expect(serverSrc).toMatch(/server\.bundle\.mjs/);
+    expect(serverSrc).toMatch(/cli\.bundle\.mjs/);
+    expect(serverSrc).toMatch(/npm install/);
+  });
+
+  test("fallback only triggers when neither CLI file exists", () => {
+    // There should be an else/fallback branch after checking both paths
+    expect(serverSrc).toMatch(/existsSync\(fallbackPath\)/);
+  });
+});

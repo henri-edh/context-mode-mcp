@@ -99,7 +99,7 @@ jobs:
       - name: Run E2E hook lifecycle test
         run: bash scripts/test-openclaw-e2e.sh
         env:
-          OPENCLAW_PROJECT_DIR: ${{ github.workspace }}
+          OPENCLAW_HOME: ${{ github.workspace }}
           CONTEXT_MODE_SESSION_SUFFIX: ""
 
       - name: Upload session DBs on failure

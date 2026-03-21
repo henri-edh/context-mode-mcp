@@ -11,7 +11,7 @@
  *   - Arg modification: mutate event.params in tool_call:before
  *   - Blocking: return { block: true, blockReason } from tool_call:before
  *   - Session ID: event context (no specific env var)
- *   - Project dir: process.env.OPENCLAW_PROJECT_DIR or process.cwd()
+ *   - Project dir: process.cwd()
  *   - Config: openclaw.json plugins.entries, ~/.openclaw/extensions/
  *   - Session dir: ~/.openclaw/context-mode/sessions/
  */
@@ -95,7 +95,7 @@ export class OpenClawAdapter implements HookAdapter {
       toolName: input.toolName ?? input.tool_name ?? "",
       toolInput: input.params ?? input.tool_input ?? {},
       sessionId: this.extractSessionId(input),
-      projectDir: process.env.OPENCLAW_PROJECT_DIR || process.cwd(),
+      projectDir: process.cwd(),
       raw,
     };
   }
@@ -108,7 +108,7 @@ export class OpenClawAdapter implements HookAdapter {
       toolOutput: input.output ?? input.tool_output,
       isError: input.isError ?? input.is_error,
       sessionId: this.extractSessionId(input),
-      projectDir: process.env.OPENCLAW_PROJECT_DIR || process.cwd(),
+      projectDir: process.cwd(),
       raw,
     };
   }
@@ -117,7 +117,7 @@ export class OpenClawAdapter implements HookAdapter {
     const input = raw as OpenClawHookInput;
     return {
       sessionId: this.extractSessionId(input),
-      projectDir: process.env.OPENCLAW_PROJECT_DIR || process.cwd(),
+      projectDir: process.cwd(),
       raw,
     };
   }
@@ -144,7 +144,7 @@ export class OpenClawAdapter implements HookAdapter {
     return {
       sessionId: this.extractSessionId(input),
       source,
-      projectDir: process.env.OPENCLAW_PROJECT_DIR || process.cwd(),
+      projectDir: process.cwd(),
       raw,
     };
   }

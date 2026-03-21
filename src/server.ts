@@ -91,7 +91,7 @@ function maybeIndexSessionEvents(store: ContentStore): void {
 function getStorePath(): string {
   const projectDir = process.env.CLAUDE_PROJECT_DIR
     || process.env.GEMINI_PROJECT_DIR
-    || process.env.OPENCLAW_PROJECT_DIR
+    || process.env.OPENCLAW_HOME
     || process.cwd();
   const normalized = projectDir.replace(/\\/g, "/");
   const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
@@ -926,7 +926,8 @@ server.registerTool(
   {
     title: "Search Indexed Content",
     description:
-      "Search indexed content. Pass ALL search questions as queries array in ONE call.\n\n" +
+      "Search indexed content. Requires prior indexing via ctx_batch_execute, ctx_index, or ctx_fetch_and_index. " +
+      "Pass ALL search questions as queries array in ONE call.\n\n" +
       "TIPS: 2-4 specific terms per query. Use 'source' to scope results.",
     inputSchema: z.object({
       queries: z.preprocess(coerceJsonArray, z
@@ -951,6 +952,25 @@ server.registerTool(
   async (params) => {
     try {
       const store = getStore();
+
+      // Guard: redirect when the index is empty — ctx_search is a follow-up
+      // tool that requires prior indexing. Guide the model to the right tool.
+      if (store.getStats().chunks === 0) {
+        return trackResponse("ctx_search", {
+          content: [{
+            type: "text" as const,
+            text: "Knowledge base is empty — no content has been indexed yet.\n\n" +
+              "ctx_search is a follow-up tool that queries previously indexed content. " +
+              "To gather and index content first, use:\n" +
+              "  • ctx_batch_execute(commands, queries) — run commands, auto-index output, and search in one call\n" +
+              "  • ctx_fetch_and_index(url) — fetch a URL, index it, then search with ctx_search\n" +
+              "  • ctx_index(content, source) — manually index text content\n\n" +
+              "After indexing, ctx_search becomes available for follow-up queries.",
+          }],
+          isError: true,
+        });
+      }
+
       const raw = params as Record<string, unknown>;
 
       // Normalize: accept both query (string) and queries (array)
@@ -1758,46 +1778,75 @@ server.registerTool(
   },
 );
 
-// ── ctx-doctor: diagnostics meta-tool ──────────────────────────────────────
+// ── ctx-doctor: diagnostics (server-side) ─────────────────────────────────
 server.registerTool(
   "ctx_doctor",
   {
     title: "Run Diagnostics",
     description:
-      "Diagnose context-mode installation. Returns a shell command to execute. " +
-      "You MUST run the returned command using your shell tool (Bash, shell_execute, " +
-      "run_in_terminal, etc.) and display the output as a markdown checklist.",
+      "Diagnose context-mode installation. Runs all checks server-side and " +
+      "returns results as a markdown checklist. No CLI execution needed.",
     inputSchema: z.object({}),
   },
   async () => {
+    const lines: string[] = ["## context-mode doctor", ""];
     const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-    const cmd = `node "${pluginRoot}/build/cli.js" doctor`;
 
-    const text = [
-      "## ctx-doctor",
-      "",
-      "Run this command using your shell execution tool:",
-      "",
-      "```",
-      cmd,
-      "```",
-      "",
-      "After the command completes, display results as a markdown checklist:",
-      "- `[x]` for PASS, `[ ]` for FAIL, `[-]` for WARN",
-      "- Example format:",
-      "  ```",
-      "  ## context-mode doctor",
-      "  - [x] Runtimes: 6/10 (javascript, typescript, python, shell, ruby, perl)",
-      "  - [x] Performance: FAST (Bun)",
-      "  - [x] Server test: PASS",
-      "  - [x] Hooks: PASS",
-      "  - [x] FTS5: PASS",
-      "  - [x] npm: v0.9.23",
-      "  ```",
-    ].join("\n");
+    // Runtimes
+    const total = 11;
+    const pct = ((available.length / total) * 100).toFixed(0);
+    lines.push(`- [x] Runtimes: ${available.length}/${total} (${pct}%) — ${available.join(", ")}`);
+
+    // Performance
+    if (hasBunRuntime()) {
+      lines.push("- [x] Performance: FAST (Bun)");
+    } else {
+      lines.push("- [-] Performance: NORMAL — install Bun for 3-5x speed boost");
+    }
+
+    // Server test
+    try {
+      const testExecutor = new PolyglotExecutor({ runtimes });
+      const result = await testExecutor.execute({ language: "javascript", code: 'console.log("ok");', timeout: 5000 });
+      if (result.exitCode === 0 && result.stdout.trim() === "ok") {
+        lines.push("- [x] Server test: PASS");
+      } else {
+        lines.push(`- [ ] Server test: FAIL — exit ${result.exitCode}`);
+      }
+    } catch (err: unknown) {
+      lines.push(`- [ ] Server test: FAIL — ${err instanceof Error ? err.message : err}`);
+    }
+
+    // FTS5 / SQLite
+    try {
+      const Database = loadDatabase();
+      const db = new Database(":memory:");
+      db.exec("CREATE VIRTUAL TABLE fts_test USING fts5(content)");
+      db.exec("INSERT INTO fts_test(content) VALUES ('hello world')");
+      const row = db.prepare("SELECT * FROM fts_test WHERE fts_test MATCH 'hello'").get() as { content: string } | undefined;
+      db.close();
+      if (row && row.content === "hello world") {
+        lines.push("- [x] FTS5 / SQLite: PASS — native module works");
+      } else {
+        lines.push("- [ ] FTS5 / SQLite: FAIL — unexpected result");
+      }
+    } catch (err: unknown) {
+      lines.push(`- [ ] FTS5 / SQLite: FAIL — ${err instanceof Error ? err.message : err}`);
+    }
+
+    // Hook script
+    const hookPath = resolve(pluginRoot, "hooks", "pretooluse.mjs");
+    if (existsSync(hookPath)) {
+      lines.push(`- [x] Hook script: PASS — ${hookPath}`);
+    } else {
+      lines.push(`- [ ] Hook script: FAIL — not found at ${hookPath}`);
+    }
+
+    // Version
+    lines.push(`- [x] Version: v${VERSION}`);
 
     return trackResponse("ctx_doctor", {
-      content: [{ type: "text" as const, text }],
+      content: [{ type: "text" as const, text: lines.join("\n") }],
     });
   },
 );
@@ -1816,7 +1865,64 @@ server.registerTool(
   },
   async () => {
     const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-    const cmd = `node "${pluginRoot}/build/cli.js" upgrade`;
+    const bundlePath = resolve(pluginRoot, "cli.bundle.mjs");
+    const fallbackPath = resolve(pluginRoot, "build", "cli.js");
+
+    let cmd: string;
+
+    if (existsSync(bundlePath)) {
+      cmd = `node "${bundlePath}" upgrade`;
+    } else if (existsSync(fallbackPath)) {
+      cmd = `node "${fallbackPath}" upgrade`;
+    } else {
+      // Inline fallback: neither CLI file exists (e.g. marketplace installs).
+      // Generate a self-contained node -e script that performs the upgrade.
+      const repoUrl = "https://github.com/mksglu/context-mode.git";
+      const copyDirs = ["build", "hooks", "skills", "scripts", ".claude-plugin"];
+      const copyFiles = ["start.mjs", "server.bundle.mjs", "cli.bundle.mjs", "package.json"];
+
+      // Write inline script to a temp .mjs file — avoids quote-escaping issues
+      // across cmd.exe, PowerShell, and bash (node -e '...' breaks on Windows).
+      const scriptLines = [
+        `import{execSync}from"node:child_process";`,
+        `import{cpSync,rmSync,existsSync,mkdtempSync}from"node:fs";`,
+        `import{join}from"node:path";`,
+        `import{tmpdir}from"node:os";`,
+        `const P=${JSON.stringify(pluginRoot)};`,
+        `const T=mkdtempSync(join(tmpdir(),"ctx-upgrade-"));`,
+        `try{`,
+        `console.log("- [x] Starting inline upgrade (no CLI found)");`,
+        `execSync("git clone --depth 1 ${repoUrl} \\""+T+"\\"",{stdio:"inherit"});`,
+        `console.log("- [x] Cloned latest source");`,
+        `execSync("npm install",{cwd:T,stdio:"inherit"});`,
+        `execSync("npm run build",{cwd:T,stdio:"inherit"});`,
+        `console.log("- [x] Built from source");`,
+        ...copyDirs.map(
+          (d) =>
+            `if(existsSync(join(T,${JSON.stringify(d)})))cpSync(join(T,${JSON.stringify(d)}),join(P,${JSON.stringify(d)}),{recursive:true,force:true});`,
+        ),
+        ...copyFiles.map(
+          (f) =>
+            `if(existsSync(join(T,${JSON.stringify(f)})))cpSync(join(T,${JSON.stringify(f)}),join(P,${JSON.stringify(f)}),{force:true});`,
+        ),
+        `console.log("- [x] Copied build artifacts");`,
+        `execSync("npm install --production",{cwd:P,stdio:"inherit"});`,
+        `console.log("- [x] Installed production dependencies");`,
+        `console.log("## context-mode upgrade complete");`,
+        `}catch(e){`,
+        `console.error("- [ ] Upgrade failed:",e.message);`,
+        `process.exit(1);`,
+        `}finally{`,
+        `try{rmSync(T,{recursive:true,force:true})}catch{}`,
+        `}`,
+      ].join("\n");
+
+      // Server writes the temp script file — avoids shell quoting issues entirely
+      const tmpScript = resolve(pluginRoot, ".ctx-upgrade-inline.mjs");
+      const { writeFileSync: writeTmp } = await import("node:fs");
+      writeTmp(tmpScript, scriptLines);
+      cmd = `node "${tmpScript}"`;
+    }
 
     const text = [
       "## ctx-upgrade",

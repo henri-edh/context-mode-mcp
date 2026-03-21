@@ -1,10 +1,52 @@
 #!/usr/bin/env node
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { existsSync, copyFileSync, chmodSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import { ensureNativeCompat } from "./native-abi.mjs";
+import { createRequire } from "node:module";
+
+/**
+ * ABI-aware native binary caching for better-sqlite3 (#148).
+ * Users with mise/asdf may run concurrent sessions with different Node versions.
+ * Each ABI needs its own compiled binary — cache them side-by-side.
+ */
+function ensureNativeCompat(pluginRoot) {
+  try {
+    const abi = process.versions.modules;
+    const nativeDir = resolve(pluginRoot, "node_modules", "better-sqlite3", "build", "Release");
+    const binaryPath = resolve(nativeDir, "better_sqlite3.node");
+    const abiCachePath = resolve(nativeDir, `better_sqlite3.abi${abi}.node`);
+
+    if (!existsSync(nativeDir)) return;
+
+    if (existsSync(abiCachePath)) {
+      copyFileSync(abiCachePath, binaryPath);
+      return;
+    }
+
+    if (!existsSync(binaryPath)) return;
+
+    try {
+      const req = createRequire(resolve(pluginRoot, "package.json"));
+      req("better-sqlite3");
+      copyFileSync(binaryPath, abiCachePath);
+    } catch (probeErr) {
+      if (probeErr?.message?.includes("NODE_MODULE_VERSION")) {
+        execSync("npm rebuild better-sqlite3", {
+          cwd: pluginRoot,
+          stdio: "pipe",
+          timeout: 60000,
+        });
+        if (existsSync(binaryPath)) {
+          copyFileSync(binaryPath, abiCachePath);
+        }
+      }
+    }
+  } catch {
+    /* best effort — server will report the error on first DB access */
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const originalCwd = process.cwd();
@@ -14,47 +56,65 @@ if (!process.env.CLAUDE_PROJECT_DIR) {
   process.env.CLAUDE_PROJECT_DIR = originalCwd;
 }
 
-// Auto-write routing instructions file for the detected platform
+// Auto-write routing instructions file for NON-hook-capable platforms only.
+// Hook-capable platforms (Claude Code, Gemini CLI, VS Code Copilot, OpenCode, OpenClaw)
+// inject routing via SessionStart hook — writing to disk dirties the git tree (#158).
+// server.ts also guards this with adapter.capabilities.sessionStart.
 try {
-  const projectDir =
-    process.env.CLAUDE_PROJECT_DIR ||
-    process.env.GEMINI_PROJECT_DIR ||
-    process.env.VSCODE_CWD ||
-    process.cwd();
-
-  const configsDir = resolve(__dirname, "configs");
-
-  // Detect platform and determine instruction file
-  const platformConfigs = [
-    { env: ["CLAUDE_PROJECT_DIR", "CLAUDE_SESSION_ID"], dir: "claude-code", file: "CLAUDE.md", target: "CLAUDE.md" },
-    { env: ["GEMINI_PROJECT_DIR", "GEMINI_SESSION_ID"], dir: "gemini-cli", file: "GEMINI.md", target: "GEMINI.md" },
-    { env: ["VSCODE_PID", "VSCODE_CWD"], dir: "vscode-copilot", file: "copilot-instructions.md", target: ".github/copilot-instructions.md" },
-    { env: ["OPENCODE_PROJECT_DIR", "OPENCODE_SESSION_ID"], dir: "opencode", file: "AGENTS.md", target: "AGENTS.md" },
-    { env: ["OPENCLAW_HOME", "OPENCLAW_PROJECT_DIR"], dir: "openclaw", file: "AGENTS.md", target: "AGENTS.md" },
-    { env: ["CODEX_HOME"], dir: "codex", file: "AGENTS.md", target: "AGENTS.md" },
+  // Hook-capable platforms set these env vars — skip file write for them.
+  // Uses verified env vars from src/adapters/detect.ts (not invented session IDs).
+  const hookCapableSessionVars = [
+    "CLAUDE_SESSION_ID",        // Claude Code
+    "GEMINI_PROJECT_DIR",       // Gemini CLI (GEMINI_CLI also valid)
+    "OPENCODE",                 // OpenCode (OPENCODE_PID also valid)
+    "OPENCLAW_HOME",            // OpenClaw (user-set home dir)
+    "OPENCLAW_CLI",             // OpenClaw (set at runtime by openclaw CLI)
+    // VS Code Copilot: VSCODE_PID is too broad (set for ALL VS Code extensions).
+    // Accept occasional harmless write rather than false-positive suppression.
   ];
+  const hasHookSupport = hookCapableSessionVars.some((e) => process.env[e]);
 
-  const detected = platformConfigs.find((p) => p.env.some((e) => process.env[e]));
-  if (detected) {
-    const targetPath = resolve(projectDir, detected.target);
-    const sourcePath = resolve(configsDir, detected.dir, detected.file);
+  if (!hasHookSupport) {
+    const projectDir =
+      process.env.CLAUDE_PROJECT_DIR ||
+      process.env.GEMINI_PROJECT_DIR ||
+      process.env.VSCODE_CWD ||
+      process.cwd();
 
-    // Ensure parent dir exists (for .github/copilot-instructions.md)
-    const targetDir = resolve(targetPath, "..");
-    if (!existsSync(targetDir)) {
-      const { mkdirSync } = await import("node:fs");
-      mkdirSync(targetDir, { recursive: true });
-    }
+    const configsDir = resolve(__dirname, "configs");
 
-    if (existsSync(sourcePath)) {
-      const content = readFileSync(sourcePath, "utf-8");
-      if (existsSync(targetPath)) {
-        const existing = readFileSync(targetPath, "utf-8");
-        if (!existing.includes("context-mode")) {
-          writeFileSync(targetPath, existing.trimEnd() + "\n\n" + content, "utf-8");
+    // Detect platform and determine instruction file
+    const platformConfigs = [
+      { env: ["CLAUDE_PROJECT_DIR"], dir: "claude-code", file: "CLAUDE.md", target: "CLAUDE.md" },
+      { env: ["GEMINI_PROJECT_DIR"], dir: "gemini-cli", file: "GEMINI.md", target: "GEMINI.md" },
+      { env: ["VSCODE_CWD"], dir: "vscode-copilot", file: "copilot-instructions.md", target: ".github/copilot-instructions.md" },
+      { env: ["OPENCODE_PROJECT_DIR"], dir: "opencode", file: "AGENTS.md", target: "AGENTS.md" },
+      { env: ["OPENCLAW_HOME"], dir: "openclaw", file: "AGENTS.md", target: "AGENTS.md" },
+      { env: ["CODEX_HOME"], dir: "codex", file: "AGENTS.md", target: "AGENTS.md" },
+    ];
+
+    const detected = platformConfigs.find((p) => p.env.some((e) => process.env[e]));
+    if (detected) {
+      const targetPath = resolve(projectDir, detected.target);
+      const sourcePath = resolve(configsDir, detected.dir, detected.file);
+
+      // Ensure parent dir exists (for .github/copilot-instructions.md)
+      const targetDir = resolve(targetPath, "..");
+      if (!existsSync(targetDir)) {
+        const { mkdirSync } = await import("node:fs");
+        mkdirSync(targetDir, { recursive: true });
+      }
+
+      if (existsSync(sourcePath)) {
+        const content = readFileSync(sourcePath, "utf-8");
+        if (existsSync(targetPath)) {
+          const existing = readFileSync(targetPath, "utf-8");
+          if (!existing.includes("context-mode")) {
+            writeFileSync(targetPath, existing.trimEnd() + "\n\n" + content, "utf-8");
+          }
+        } else {
+          writeFileSync(targetPath, content, "utf-8");
         }
-      } else {
-        writeFileSync(targetPath, content, "utf-8");
       }
     }
   }
@@ -129,6 +189,13 @@ for (const pkg of ["better-sqlite3", "turndown", "turndown-plugin-gfm", "@mixmar
 // Users with mise/asdf may run concurrent sessions with different Node versions.
 // Each ABI needs its own compiled binary — cache them side-by-side.
 ensureNativeCompat(__dirname);
+
+// Self-heal: create CLI shim if cli.bundle.mjs is missing (marketplace installs)
+if (!existsSync(resolve(__dirname, "cli.bundle.mjs")) && existsSync(resolve(__dirname, "build", "cli.js"))) {
+  const shimPath = resolve(__dirname, "cli.bundle.mjs");
+  writeFileSync(shimPath, '#!/usr/bin/env node\nawait import("./build/cli.js");\n');
+  if (process.platform !== "win32") chmodSync(shimPath, 0o755);
+}
 
 // Bundle exists (CI-built) — start instantly
 if (existsSync(resolve(__dirname, "server.bundle.mjs"))) {

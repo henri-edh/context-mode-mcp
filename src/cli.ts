@@ -474,8 +474,8 @@ async function upgrade() {
     }
 
     const items = [
-      "build", "src", "hooks", "skills", ".claude-plugin",
-      "start.mjs", "native-abi.mjs", "server.bundle.mjs", "cli.bundle.mjs", "package.json",
+      "build", "src", "hooks", "skills", "scripts", ".claude-plugin",
+      "start.mjs", "server.bundle.mjs", "cli.bundle.mjs", "package.json",
     ];
     for (const item of items) {
       try {
@@ -593,13 +593,16 @@ async function upgrade() {
   p.log.step("Setting hook script permissions...");
   const permSet = adapter.setHookPermissions(pluginRoot);
   // Also ensure CLI binaries are executable (tsc doesn't set +x)
-  for (const bin of ["build/cli.js", "cli.bundle.mjs"]) {
-    const binPath = resolve(pluginRoot, bin);
-    try {
-      accessSync(binPath, constants.F_OK);
-      execSync(`chmod +x "${binPath}"`, { stdio: "ignore" });
-      permSet.push(binPath);
-    } catch { /* not found — skip */ }
+  // chmod is POSIX-only — skip on Windows where execute bits are irrelevant
+  if (process.platform !== "win32") {
+    for (const bin of ["build/cli.js", "cli.bundle.mjs"]) {
+      const binPath = resolve(pluginRoot, bin);
+      try {
+        accessSync(binPath, constants.F_OK);
+        execSync(`chmod +x "${binPath}"`, { stdio: "ignore" });
+        permSet.push(binPath);
+      } catch { /* not found — skip */ }
+    }
   }
   if (permSet.length > 0) {
     p.log.success(color.green("Permissions set") + color.dim(` — ${permSet.length} hook script(s)`));

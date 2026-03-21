@@ -76,7 +76,7 @@ describe("OpenClawAdapter", () => {
       expect(event.toolInput).toEqual({ command: "ls -la" });
     });
 
-    it("projectDir falls back to cwd when no OPENCLAW_PROJECT_DIR", () => {
+    it("projectDir falls back to cwd", () => {
       const event = adapter.parsePreToolUseInput({
         toolName: "shell",
       });

@@ -27,7 +27,7 @@ describe("detectPlatform", () => {
     delete process.env.OPENCODE;
     delete process.env.OPENCODE_PID;
     delete process.env.OPENCLAW_HOME;
-    delete process.env.OPENCLAW_PROJECT_DIR;
+    delete process.env.OPENCLAW_CLI;
     delete process.env.CODEX_CI;
     delete process.env.CODEX_THREAD_ID;
     delete process.env.CURSOR_CWD;
@@ -100,8 +100,8 @@ describe("detectPlatform", () => {
     expect(signal.confidence).toBe("high");
   });
 
-  it("returns openclaw when OPENCLAW_PROJECT_DIR is set", () => {
-    process.env.OPENCLAW_PROJECT_DIR = "/some/project";
+  it("returns openclaw when OPENCLAW_CLI is set", () => {
+    process.env.OPENCLAW_CLI = "1";
     const signal = detectPlatform();
     expect(signal.platform).toBe("openclaw");
     expect(signal.confidence).toBe("high");

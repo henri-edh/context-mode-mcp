@@ -36,7 +36,7 @@ describe("OpenCodeAdapter", () => {
   describe("parsePreToolUseInput", () => {
     it("extracts sessionId from sessionID (camelCase)", () => {
       const event = adapter.parsePreToolUseInput({
-        tool_name: "shell",
+        tool: "shell",
         sessionID: "oc-session-123",
       });
       expect(event.sessionId).toBe("oc-session-123");
@@ -44,22 +44,22 @@ describe("OpenCodeAdapter", () => {
 
     it("projectDir falls back to cwd when no OPENCODE_PROJECT_DIR", () => {
       const event = adapter.parsePreToolUseInput({
-        tool_name: "shell",
+        tool: "shell",
       });
       expect(event.projectDir).toBe(process.cwd());
     });
 
-    it("extracts toolName from tool_name", () => {
+    it("extracts toolName from tool", () => {
       const event = adapter.parsePreToolUseInput({
-        tool_name: "read_file",
-        tool_input: { path: "/some/file" },
+        tool: "read_file",
+        args: { path: "/some/file" },
       });
       expect(event.toolName).toBe("read_file");
     });
 
     it("falls back to pid when no sessionID", () => {
       const event = adapter.parsePreToolUseInput({
-        tool_name: "shell",
+        tool: "shell",
       });
       expect(event.sessionId).toBe(`pid-${process.ppid}`);
     });
