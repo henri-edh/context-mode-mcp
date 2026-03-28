@@ -714,3 +714,30 @@ describe("Package exports", () => {
     expect(mod.upgrade).toBeUndefined();
   });
 });
+
+// ── Issue #181: upgrade must not delete sibling version dirs mid-session ──
+
+describe("Cache dir safety (#181)", () => {
+  const CLI_SOURCE = readFileSync(resolve(ROOT, "src/cli.ts"), "utf-8");
+  const PRETOOLUSE_SOURCE = readFileSync(resolve(ROOT, "hooks/pretooluse.mjs"), "utf-8");
+
+  test("cli.ts upgrade does not rmSync sibling cache version dirs", () => {
+    // The upgrade function must NOT contain a loop that deletes sibling version dirs.
+    // Old pattern: filter dirs !== myDir → rmSync each in a loop
+    const hasStaleCleanup = CLI_SOURCE.includes("stale cache dir");
+    expect(hasStaleCleanup).toBe(false);
+  });
+
+  test("pretooluse.mjs does not nuke stale version dirs", () => {
+    // Step 4 "Nuke stale version dirs" must not exist
+    const hasNukeBlock = PRETOOLUSE_SOURCE.includes("Nuke stale version dirs");
+    expect(hasNukeBlock).toBe(false);
+  });
+
+  test("sessionstart.mjs has age-gated lazy cleanup for old cache dirs", () => {
+    const SESSION_SOURCE = readFileSync(resolve(ROOT, "hooks/sessionstart.mjs"), "utf-8");
+    // Must contain age-gated cleanup logic (>1 hour check)
+    expect(SESSION_SOURCE).toContain("lazy cleanup");
+    expect(SESSION_SOURCE).toContain("3600000"); // 1 hour in ms
+  });
+});

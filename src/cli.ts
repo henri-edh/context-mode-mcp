@@ -456,22 +456,8 @@ async function upgrade() {
     // Step 3: Update in-place
     s.start("Updating files in-place");
 
-    const cacheParentMatch = pluginRoot.match(
-      /^(.*[\\/]plugins[\\/]cache[\\/][^\\/]+[\\/][^\\/]+[\\/])/,
-    );
-    if (cacheParentMatch) {
-      const cacheParent = cacheParentMatch[1];
-      const myDir = pluginRoot.replace(cacheParent, "").replace(/[\\/]/g, "");
-      try {
-        const oldDirs = readdirSync(cacheParent).filter(d => d !== myDir);
-        for (const d of oldDirs) {
-          try { rmSync(resolve(cacheParent, d), { recursive: true, force: true }); } catch { /* skip */ }
-        }
-        if (oldDirs.length > 0) {
-          p.log.info(color.dim(`  Cleaned ${oldDirs.length} stale cache dir(s)`));
-        }
-      } catch { /* parent may not exist */ }
-    }
+    // Old version dirs are cleaned lazily by sessionstart.mjs (age-gated >1h)
+    // to avoid breaking active sessions that still reference them (#181).
 
     const items = [
       "build", "src", "hooks", "skills", "scripts", ".claude-plugin",

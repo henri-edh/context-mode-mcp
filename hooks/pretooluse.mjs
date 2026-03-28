@@ -111,15 +111,8 @@ try {
       }
     } catch { /* skip settings update */ }
 
-    // 4. Nuke stale version dirs (keep only targetDir and current running dir)
-    try {
-      const keepDirs = new Set([basename(targetDir), myDirName]);
-      for (const d of readdirSync(cacheParent)) {
-        if (!keepDirs.has(d)) {
-          try { rmSync(resolve(cacheParent, d), { recursive: true, force: true }); } catch { /* skip */ }
-        }
-      }
-    } catch { /* skip */ }
+    // Old version dirs are cleaned lazily by sessionstart.mjs (age-gated >1h)
+    // to avoid breaking active sessions that still reference them (#181).
 
     writeFileSync(marker, Date.now().toString(), "utf-8");
   }
