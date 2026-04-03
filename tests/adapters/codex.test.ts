@@ -1,5 +1,6 @@
 import "../setup-home";
 import { describe, it, expect, beforeEach } from "vitest";
+import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexAdapter } from "../../src/adapters/codex/index.js";
@@ -219,5 +220,36 @@ describe("CodexAdapter", () => {
       expect(config).toHaveProperty("PostToolUse");
       expect(config).toHaveProperty("SessionStart");
     });
+  });
+});
+
+// ── Hook script integration tests ──────────────────────
+describe("Codex pretooluse hook script", () => {
+  it("outputs valid JSON with hookEventName even for passthrough (no routing match)", () => {
+    const hookScript = resolve(__dirname, "../../hooks/codex/pretooluse.mjs");
+    const input = JSON.stringify({
+      tool_name: "Bash",
+      tool_input: { command: "ls" },
+      session_id: "test-1",
+      cwd: "/tmp",
+      hook_event_name: "PreToolUse",
+      model: "o3",
+      permission_mode: "default",
+      tool_use_id: "tu1",
+      transcript_path: null,
+      turn_id: "t1",
+    });
+
+    const stdout = execSync(
+      `printf '%s' '${input.replace(/'/g, "'\\''")}' | node ${hookScript}`,
+      {
+        encoding: "utf-8",
+        timeout: 10000,
+      },
+    );
+
+    const parsed = JSON.parse(stdout.trim());
+    expect(parsed.hookSpecificOutput).toBeDefined();
+    expect(parsed.hookSpecificOutput.hookEventName).toBe("PreToolUse");
   });
 });

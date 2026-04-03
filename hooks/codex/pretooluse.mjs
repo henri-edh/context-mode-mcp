@@ -25,6 +25,7 @@ const projectDir = getInputProjectDir(input, CODEX_OPTS);
 
 const decision = routePreToolUse(tool, toolInput, projectDir, "codex");
 const response = formatDecision("codex", decision);
-if (response !== null) {
-  process.stdout.write(JSON.stringify(response) + "\n");
-}
+const output = response ?? {
+  hookSpecificOutput: { hookEventName: "PreToolUse" },
+};
+process.stdout.write(JSON.stringify(output) + "\n");
